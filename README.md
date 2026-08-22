@@ -1,175 +1,126 @@
+```
 The Obsidian kernel
 ===================
 
-Obsidian is a hybrid kernel for x86_64, i686 and arm64 systems. It manages
-hardware, system resources, and provides the fundamental services for all
-other software on machines it boots.
+Obsidian is a hybrid operating-system kernel for three machine families,
+written from scratch in C with one Rust component. It manages hardware,
+system resources, and provides the fundamental services for all other
+software on machines it boots.
+
 
 Quick Start
 -----------
 
-* Build everything: run `make` in the top of this tree
+* Build everything: run make in the top of this tree
 * Build one architecture: make x86_64 / make x86_32 / make arm64
 * Clean artifacts: make clean
-* Toolchain requirements: see "Essential Documentation" below
-
-Essential Documentation
------------------------
-
-All users should be familiar with:
-
-* Build targets: Makefile and Makefile.build
-* Coding conventions: GPL-2.0 header, tab indentation, no banner comments
-* License: every file carries an SPDX identifier, GPL-2.0-only
+* Toolchain requirements: gcc, nasm, rustc for x86_64 targets,
+  gcc-aarch64-linux-gnu for arm64
 
 
-Who Are You?
-============
+Artifacts
+---------
 
-Find your role below:
+Every build lands under out/<arch>-<variant>/:
 
-* New Kernel Developer: Getting started inside this tree
-* Academic Researcher: Studying hybrid kernel internals
-* Security Expert: Hardening and the recovery flow
-* Backport/Maintenance Engineer: Keeping variants building
-* System Administrator: Booting and troubleshooting machines
-* Maintainer: Leading subsystems in the tree
-* Hardware Vendor: Writing drivers for new hardware
-* Distribution Packager: Building clean release artifacts
-* AI Coding Assistant: LLMs and AI-powered development tools
+    out/x86_64-standard/obsidian_core.elf     full kernel, 64-bit PC
+    out/x86_64-secure/obsidian_secure.elf     recovery kernel
+    out/x86-standard/obsidian_core.elf        full kernel, 32-bit PC
+    out/x86-ssecure/obsidian_secure.elf        recovery kernel
+    out/arm64-standard/obsidian_core.elf      full kernel, arm64 virt
+    out/arm64-secure/obsidian_secure.elf      recovery kernel
 
 
-For Specific Users
-==================
+What Is Inside
+--------------
 
-New Kernel Developer
+    Boot flow     init/                 entry, dispatch, cmdline, clock
+    Memory        mm/, arch/*/pmm.c     frame manager; Rust allocator
+                                        behind a stable ABI, C twin
+    Console       drivers/gpu/          text VGA, Bochs LFB, backlight
+    Input         drivers/input/        PS/2, Synaptics pad, serial
+                                        mouse, analog gameport
+    Network       net/, drivers/net/    e1000 polled NIC; ARP, IPv4,
+                                        ICMP, UDP, TCP active-open
+    Storage       fs/                   ramfs, flat in-memory files
+    Platform      drivers/platform/     embedded controller, ThinkPad
+                                        fan control, battery meter
+    Firmware      drivers/firmware/     CMOS NVRAM records, SMBIOS
+    ACPI          drivers/acpi/         RSDP discovery, FADT walk
+    Guards        security/             stack protector, memory guard
+    Recovery      secure/               secure kernel boot flow
+
+
+Supported Hardware
+------------------
+
+    Display     VGA text mode                        stable
+    Display     Bochs / std-vga linear framebuffer   stable
+    Display     Intel panel PWM backlight            stable
+    Keyboard    PS/2 set 1 / set 2                   stable
+    Pointing    PS/2 mouse                           stable
+    Pointing    Synaptics touchpad, absolute mode    stable
+    Pointing    Microsoft serial mouse on 16550      stable
+    Joystick    legacy analog gameport               experimental
+    Ethernet    Intel e1000                          stable
+    Wireless    detection only                       partial
+    Laptop      ThinkPad EC fan control, battery     stable
+    Serial      16550 UART, ARM PL011                stable
+    ARM64       QEMU virt machine via device tree    stable
+
+
+When A Fault Happens
 --------------------
 
-Welcome! Start your journey here:
+The kernel never dies silently.
 
-* Entry Point: init/main.c
-* Boot Sequence: init/boot_flow.c
-* Architecture Entries: arch/x86_64/start.c, arch/arm64/start.c
-* Command Line Parser: init/cmdline.c
-* Timekeeping: init/time.h
-* Printk Core: lib/printk.c
+1. Screen switches to a blue diagnostic panel listing the fault
+2. Every recovery action streams live onto the panel
+3. Event stamped into CMOS NVRAM before anything else runs
+4. Five second countdown, then the machine resets itself
+5. Next boot reads the stamp and warns the operator
+6. Secure kernel takes over: explains the failure, enumerates
+   PCI devices, tests memory, hands back to normal boot
 
-Academic Researcher
--------------------
+Relevant files:
 
-Explore the architecture of a hybrid design:
-
-* Memory Management: mm/, physical frames in arch/<arch>/pmm.c
-* Rust Allocator: mm/alloc/src/lib.rs
-* C Allocator Fallback: mm/heap_c.c
-* Networking Stack: net/stack.c
-* Filesystem: fs/ramfs.c
-* Console Layer: drivers/gpu/console.c
-
-Security Expert
----------------
-
-Hardening documentation lives beside the code:
-
-* Panic Handler With Blue Display: lib/panic.c
-* CMOS Breadcrumb Protocol: drivers/firmware/cmos.c
-* Stack Protection: security/stack_guard.c
-* Memory Guard: security/memguard.c
-* Secure Kernel Flow: secure/secure_boot.c
-
-Backport/Maintenance Engineer
------------------------------
-
-Keep both variants healthy everywhere:
-
-* Per-Architecture Rules: Makefile.build
-* Variant Definitions: standard and secure in Makefile.build
-* Regression Sweep: make && make clean after changes
-
-System Administrator
---------------------
-
-Booting and troubleshooting:
-
-* Boot Menu: grub.cfg.in, three entries per architecture
-* Kernel Parameters: parsed by init/cmdline.c, token "version"
-  switches to an information screen
-* Fault Recovery: blue panic display then automatic reset,
-  previous fault reported on next boot
-
-Maintainer
-----------
-
-Leading subsystems:
-
-* Subsystem Map: "Source Layout" below
-* Driver Conventions: polled first, IRQ handlers via include/irq.h
-* Freestanding Rule: no libc beyond stdarg.h anywhere
-
-Hardware Vendor
----------------
-
-Write drivers for new hardware:
-
-* Bus Discovery: drivers/bus/pci.c
-* GPU And Backlight: drivers/gpu/
-* Input Devices: drivers/input/
-* Network Adapters: drivers/net/e1000.c
-* Platform EC Devices: drivers/platform/x86/
-* ARM64 Console UART: arch/arm64/pl011.c
-* Device Tree Reference: arch/arm64/dts/obsidian-virt.dts
-
-Distribution Packager
----------------------
-
-Package and distribute the kernel:
-
-* Reproducible Targets: Makefile, Makefile.build
-* Clean Tree Check: make clean leaves only sources
-* Artifacts: out/<arch>-<variant>/obsidian_core.elf and
-  obsidian_secure.elf
-
-AI Coding Assistant
--------------------
-
-CRITICAL: If you are an LLM or AI-powered coding assistant, you MUST read
-and follow these rules before contributing to this tree:
-
-* Never add banner comments or section divider lines
-* Keep files freestanding-safe, no libc beyond stdarg.h
-* Use existing helpers: k_-prefixed strings, u8/u32/u64 types
-* Both variants must keep compiling: standard and secure
+    lib/panic.c                  diagnostic panel and reset logic
+    drivers/firmware/cmos.c      NVRAM event stamping
+    secure/secure_boot.c         recovery personality
 
 
-Fault Handling
-==============
+Repository Map
+--------------
 
-A fatal fault takes over the screen with a blue diagnostic display,
-streams the actions being taken, records the event in CMOS NVRAM,
-counts down five seconds and resets the machine. The next boot reads
-the flag and warns the operator. The Secure kernel boots a minimal
-recovery environment that reports why the previous boot failed, lists
-PCI devices, runs a memory test and returns to the standard kernel.
-
-
-Source Layout
-=============
-
-    arch/       x86_64/, x86/, arm64/ (dts/, FDT parser, PL011)
-    init/       entry point, boot flow, command line, timekeeping
-    drivers/    bus, gpu, input, net, firmware, platform/x86
-    include/    headers shared by every architecture
-    lib/        printk, string helpers, panic handler
-    mm/         frame manager plus allocator backends
-    net/        ARP, IPv4, ICMP, UDP and TCP over polled NICs
-    fs/         ramfs
-    security/   memguard and stack protector
-    secure/     Secure kernel boot flow
+    arch/       per-machine code: x86_64/, x86/, arm64/
+    init/       where execution begins and how boot unfolds
+    drivers/    everything that touches devices
+    include/    interfaces shared across all machines
+    lib/        printing, strings, panic machinery
+    mm/         allocators and heap plumbing
+    net/        protocols layered over polled NICs
+    fs/         ramfs implementation
+    security/   hardening guards
+    secure/     recovery personality
 
 
-Communication and Support
-=========================
+Status And Plans
+----------------
 
-* Issue Tracker: open tickets against this repository
-* Source Browser: this tree is the reference
-* MAINTAINERS file: not used yet, subsystem owners live in git history
+Done today: six green builds, working network stack, input family,
+fan and battery telemetry, automatic crash recovery loop.
+
+Planned next:
+
+* vendor keyboard-light backends
+* brightness through ACPI _BCM methods
+* persistent filesystems beyond ramfs
+* SMP bring-up on arm64
+* interrupt-driven networking
+
+
+License
+-------
+
+GPL-2.0-only. Each file carries an SPDX header matching its origin.
+```
