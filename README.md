@@ -1,2 +1,1 @@
-# obsidian_kernel
-kernel for ObsidianOS. 
+# obsidian
