@@ -1,0 +1,23 @@
+# Obsidian boot menu (GRUB).
+# Placeholders are filled in by the top-level Makefile:
+#   @VERSION@   kernel version string
+#   @ARCHNAME@  x86_64 or i686
+#   @LOADERCMD@ multiboot2 on 64-bit, multiboot on 32-bit
+
+set default=0
+set timeout=5
+
+menuentry "Obsidian @VERSION@ (@ARCHNAME@)" {
+	@LOADERCMD@ /boot/obsidian_core.elf
+	boot
+}
+
+menuentry "Obsidian @VERSION@ -- version info" {
+	@LOADERCMD@ /boot/obsidian_core.elf version
+	boot
+}
+
+menuentry "Obsidian Secure @VERSION@ (recovery)" {
+	@LOADERCMD@ /boot/obsidian_secure.elf
+	boot
+}

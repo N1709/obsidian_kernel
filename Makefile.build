@@ -1,0 +1,129 @@
+# Obsidian Kernel per-architecture build rules.
+#
+# Invoked by the top-level Makefile with ARCH and VARIANT set.
+# Never call this file directly; use make / make x86_64 / make x86_32.
+
+ifeq ($(ARCH),x86_64)
+ARCHFLAGS := -m64 -march=x86-64 -mno-red-zone -mcmodel=kernel
+NASMFMT   := elf64
+LDARCH    := -Wl,-m,elf_x86_64
+LINKER_LD := arch/x86_64/linker.ld
+OUTDIR    := out/x86_64-$(VARIANT)
+else ifeq ($(ARCH),x86)
+ARCHFLAGS := -m32 -march=i686 -mtune=generic
+NASMFMT   := elf32
+LDARCH    := -Wl,-m,elf_i386
+LINKER_LD := arch/x86/linker.ld
+OUTDIR    := out/x86-$(VARIANT)
+else ifeq ($(ARCH),arm64)
+CROSS     ?= aarch64-linux-gnu-
+CC        := $(CROSS)gcc
+LD        := $(CROSS)gcc
+ARCHFLAGS := -mgeneral-regs-only -march=armv8-a -mcmodel=small \
+             -fno-jump-tables -fno-delete-null-pointer-checks
+NASMFMT   :=
+LDARCH    :=
+LINKER_LD := arch/arm64/linker.ld
+OUTDIR    := out/arm64-$(VARIANT)
+else
+$(error unknown ARCH '$(ARCH)', expected x86_64, x86 or arm64)
+endif
+
+ifeq ($(VARIANT),secure)
+VARIANT_DEFS := -DOBSIDIAN_SECURE=1
+OUT          := $(OUTDIR)/obsidian_secure.elf
+else ifeq ($(VARIANT),standard)
+VARIANT_DEFS :=
+OUT          := $(OUTDIR)/obsidian_core.elf
+else
+$(error unknown VARIANT '$(VARIANT)', expected standard or secure)
+endif
+
+BUILD := $(OUTDIR)/obj
+
+VERSION_DEFS := \
+	-DKERNEL_VERSION='"$(OBSIDIAN_VERSION)"' \
+	-DKERNEL_BUILD_ARCH='"$(ARCH)"' \
+	-DKERNEL_BUILD_DATE='"$(BUILD_DATE)"' \
+	-D__OBSIDIAN__
+
+WARNINGS := -Wall -Wextra -Wno-unused-parameter
+
+COMMONFLAGS := \
+	$(ARCHFLAGS) $(VARIANT_DEFS) $(VERSION_DEFS) \
+	-O2 -g0 \
+	-isystem $(shell $(CC) -print-file-name=include) \
+	-ffreestanding -fno-builtin -fno-stack-protector \
+	-fno-pic -fno-pie -fno-asynchronous-unwind-tables \
+	-fno-unwind-tables -fno-omit-frame-pointer \
+	-fdata-sections -ffunction-sections \
+	-nostdlib \
+	-Iinclude -Ilib -Idrivers -Iinit -Imm -Isecure -Isecurity \
+	-Iarch/$(ARCH)
+
+C_SOURCES := \
+	$(shell find init secure lib mm security net fs drivers -name '*.c') \
+	$(shell find arch/$(ARCH) -name '*.c')
+
+ASM_SOURCES := \
+	$(shell find arch/$(ARCH) \( -name '*.s' -o -name '*.S' \))
+
+RUST_LIB :=
+RUST_HOST := $(shell $(RUSTC) -vV 2>/dev/null | awk '/host:/ {print $$2}')
+ifeq ($(ARCH),x86_64)
+ifeq ($(findstring x86_64,$(RUST_HOST)),x86_64)
+USE_RUST_ALLOC := yes
+RUST_LIB := $(BUILD)/libobsidian_alloc.a
+VERSION_DEFS += -DOB_HAVE_RUST_ALLOC=1
+# heap_c.c and the Rust backend are interchangeable: link exactly one.
+C_SOURCES := $(filter-out mm/heap_c.c,$(C_SOURCES))
+endif
+endif
+
+C_OBJECTS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SOURCES))
+ASM_OBJECTS := $(patsubst %.s,$(BUILD)/%.o,$(ASM_SOURCES))
+OBJECTS     := $(ASM_OBJECTS) $(C_OBJECTS) $(RUST_LIB)
+
+LDFLAGS := \
+	$(ARCHFLAGS) \
+	$(LDARCH) \
+	-nostdlib -static -no-pie \
+	-Wl,-T,$(LINKER_LD) \
+	-Wl,--gc-sections \
+	-Wl,--build-id=none \
+	-Wl,-z,noexecstack \
+	-Wl,--no-warn-rwx-segments \
+	$(shell $(CC) $(ARCHFLAGS) -print-libgcc-file-name)
+
+.PHONY: kernel
+kernel: $(OUT)
+
+$(OUT): $(OBJECTS) arch/$(ARCH)/linker.ld
+	@mkdir -p $(dir $@)
+	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
+	@printf "  LD      %-28s (%s bytes)\n" $@ $$(stat -c%s $@)
+
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	@printf "  CC      %s\n" $<
+	@$(CC) $(COMMONFLAGS) $(WARNINGS) -std=gnu11 -c $< -o $@
+
+$(BUILD)/%.o: %.s
+	@mkdir -p $(dir $@)
+	@printf "  AS      %s\n" $<
+	@$(NASM) -f $(NASMFMT) $< -o $@
+
+$(BUILD)/%.o: %.S
+	@mkdir -p $(dir $@)
+	@printf "  AS      %s\n" $<
+	@$(CC) $(COMMONFLAGS) -c $< -o $@
+
+$(RUST_LIB): mm/alloc/src/lib.rs
+	@mkdir -p $(dir $@)
+	@printf "  RUSTC   mm/alloc/src/lib.rs\n"
+	@$(RUSTC) --edition 2021 \
+		--crate-type staticlib --crate-name obsidian_alloc \
+		-C opt-level=s -C panic=abort \
+		-C relocation-model=static -C code-model=kernel \
+		-C target-feature=-sse,-sse2,+soft-float \
+		-o $@ mm/alloc/src/lib.rs
