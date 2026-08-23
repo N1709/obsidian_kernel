@@ -43,7 +43,13 @@ static inline void io_wait(void) {
 static inline void irq_disable(void) { __asm__ volatile ("cli"); }
 static inline void irq_enable(void)  { __asm__ volatile ("sti"); }
 static inline void cpu_halt(void)    { __asm__ volatile ("hlt"); }
-static inline void cpu_relax(void)   { __asm__ volatile ("pause"); }
+static inline void cpu_relax(void) {
+#if defined(__aarch64__)
+	__asm__ volatile ("yield");
+#else
+	__asm__ volatile ("pause");
+#endif
+}
 
 static inline u64 rdtsc(void) {
 	u32 lo, hi;
@@ -81,6 +87,10 @@ static inline u64 rdtsc(void) {
 	__asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
 	return v;
 }
+#endif
+
+#if !defined(__x86_64__) && !defined(__i386__)
+static inline void cpu_relax(void) { __asm__ volatile ("yield"); }
 #endif
 
 #endif

@@ -92,15 +92,16 @@ LDFLAGS := \
 	-Wl,--gc-sections \
 	-Wl,--build-id=none \
 	-Wl,-z,noexecstack \
-	-Wl,--no-warn-rwx-segments \
-	$(shell $(CC) $(ARCHFLAGS) -print-libgcc-file-name)
+	-Wl,--no-warn-rwx-segments
+
+LIBGCC := $(shell $(CC) $(ARCHFLAGS) -print-libgcc-file-name)
 
 .PHONY: kernel
 kernel: $(OUT)
 
 $(OUT): $(OBJECTS) arch/$(ARCH)/linker.ld
 	@mkdir -p $(dir $@)
-	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJECTS) $(RUST_LIB) $(LIBGCC)
 	@printf "  LD      %-28s (%s bytes)\n" $@ $$(stat -c%s $@)
 
 $(BUILD)/%.o: %.c

@@ -26,7 +26,7 @@ Every build lands under out/<arch>-<variant>/:
     out/x86_64-standard/obsidian_core.elf     full kernel, 64-bit PC
     out/x86_64-secure/obsidian_secure.elf     recovery kernel
     out/x86-standard/obsidian_core.elf        full kernel, 32-bit PC
-    out/x86-ssecure/obsidian_secure.elf        recovery kernel
+    out/x86-secure/obsidian_secure.elf        recovery kernel
     out/arm64-standard/obsidian_core.elf      full kernel, arm64 virt
     out/arm64-secure/obsidian_secure.elf      recovery kernel
 

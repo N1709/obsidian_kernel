@@ -11,6 +11,8 @@
 #include "../drivers/gpu/backlight.h"
 #include "../net/netstack.h"
 #include "../fs/ramfs.h"
+#include "../drivers/block/blkdev.h"
+#include "../fs/ext4.h"
 #include "../drivers/gpu/gpu.h"
 #include "../drivers/bus/pci.h"
 #include "../drivers/platform/x86/lenovo/thinkpad.h"
@@ -21,12 +23,15 @@
 #include "../include/panic.h"
 #include "../include/io.h"
 #include "../mm/heap.h"
+#include "../lib/string.h"
 #include "../drivers/net/net_detect.h"
 #include "../security/security.h"
 #include "cmdline.h"
 
 /* Provided by each architecture directory. */
 extern void cpu_report(void);
+extern void ata_probe(void);
+extern void virtio_blk_probe(void);
 
 /*
  * Full-feature boot sequence used by the standard kernel.
@@ -79,6 +84,64 @@ static void bringup_drivers(void) {
 		kputs("input legacy gameport joystick found");
 }
 
+/*
+ * Persistence demo: keep a boot counter in /boots on the ext4 volume.
+ * A number that grows across reboots proves the block device, the
+ * ext4 write path and the journal all survive a power cycle.
+ */
+static void ext4_persistence_demo(void) {
+	if (!ext4_mount())
+		return;
+
+	char buf[64] = { 0 };
+	u32 boots = 0;
+	int n = ext4_read("/boots", buf, sizeof buf - 1);
+
+	if (n > 0)
+		for (int i = 0; i < n && buf[i] >= '0' &&
+		     buf[i] <= '9'; i++)
+			boots = boots * 10 + (u32)(buf[i] - '0');
+
+	boots++;
+
+	char out[32];
+	u32 len = 0;
+	u32 v = boots;
+	char tmp[12];
+
+	do {
+		tmp[len++] = (char)('0' + v % 10);
+		v /= 10;
+	} while (v);
+
+	for (u32 i = 0; i < len; i++)
+		out[i] = tmp[len - 1 - i];
+	out[len] = '\n';
+
+	if (ext4_write("/boots", out, len + 1)) {
+		kputs("ext4 demo write failed");
+		return;
+	}
+
+	kprintf("ext4 persistence: boot #%u recorded\n", boots);
+
+	struct ext4_dirent_info ents[16];
+	int cnt = ext4_listdir("/", ents, 16);
+
+	kputs("ext4 root:");
+	for (int i = 0; i < cnt; i++) {
+		char p[EXT4_MAX_PATH];
+		u32 l = k_strlen(ents[i].name);
+
+		memcpy(p + 1, ents[i].name, l);
+		p[0] = '/';
+		p[l + 1] = 0;
+		kprintf("  %s%s %lu bytes\n", ents[i].name,
+			ents[i].type == 2 ? "/" : " ",
+			ext4_size(p));
+	}
+}
+
 static void idle_loop(void) {
 	kputs("\nready. type keys to test input, ESC reboots.");
 
@@ -107,6 +170,11 @@ void standard_boot(const boot_info_t *boot) {
 
 	ramfs_init();
 	kputs("fs ramfs mounted");
+
+	blkdev_init();
+	ata_probe();
+	virtio_blk_probe();
+	ext4_persistence_demo();
 
 	u8 code;
 

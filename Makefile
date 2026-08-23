@@ -32,7 +32,7 @@ QEMU32  ?= qemu-system-i386
 ARCHES  := x86_64 x86 arm64
 VARIANTS:= standard secure
 
-.PHONY: all help x86_64 x86_32 arm64 iso run run32 secure clean distclean
+.PHONY: all help x86_64 x86_32 arm64 iso run run32 img run-hd run32-hd run-arm64 secure clean distclean
 
 all:
 	@for a in $(ARCHES); do \
@@ -101,6 +101,30 @@ run: iso-x86_64
 
 run32: iso-x86
 	$(QEMU32) -m 512 -cdrom obsidian-i386.iso
+
+# ---- ext4 persistence demo -------------------------------------------
+# make img    : create obsidian.img formatted as ext4
+# make run-hd : boot the 64-bit ISO with the image attached as hard disk
+
+IMG     := obsidian.img
+IMG_MB  ?= 64
+
+img:
+	truncate -s $(IMG_MB)M $(IMG)
+	mke2fs -q -F -t ext4 -b 4096 -I 256 \
+		-E lazy_itable_init=0,lazy_journal_init=0 $(IMG)
+
+run-hd: iso-x86_64 img
+	$(QEMU64) -m 512 -vga std -cdrom obsidian-x86_64.iso -hda $(IMG)
+
+run32-hd: iso-x86 img
+	$(QEMU32) -m 512 -cdrom obsidian-i386.iso -hda $(IMG)
+
+run-arm64: img
+	qemu-system-aarch64 -M virt -cpu cortex-a57 -m 512 -nographic \
+		-kernel out/arm64-standard/obsidian_core.elf \
+		-drive if=none,file=$(IMG),id=hd0,format=raw \
+		-device virtio-blk-device,drive=hd0
 
 clean:
 	rm -rf out stage *.iso

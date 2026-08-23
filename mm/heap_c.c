@@ -56,6 +56,14 @@ static struct block_hdr *hdr_at(u32 off) {
 	return (struct block_hdr *)(hbase + off);
 }
 
+void *kzalloc(u32 size) {
+	void *p = kmalloc(size);
+
+	if (p)
+		memset(p, 0, size);
+	return p;
+}
+
 void *kmalloc(u32 size) {
 	if (!size || !hbase)
 		return NULL;
